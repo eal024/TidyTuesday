@@ -1,0 +1,194 @@
+---
+title: "Ramen rating"
+author: "eal"
+date: "9/14/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Ramen raing DavidRobinson
+
+```{r}
+
+library(tidyverse);
+theme_set(theme_light())
+ramen_ratings <- readr::read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2019/2019-06-04/ramen_ratings.csv")
+```
+
+## Look at the data
+
+```{r}
+ramen_ratings %>% 
+  head() # or View()
+```
+
+first impresion:
+- linear regression, predicing the star rating.
+
+## cleaning and prepering the data
+
+To get an understanding of which variable/factor you can get info from.
+
+
+```{r}
+# gather then create a barplot.
+ramen_ratings %>% 
+  gather(category, value,  -review_number, -stars) %>% 
+  count( category, value) %>% 
+  group_by( category) %>% 
+  top_n( 16, n ) %>% 
+  ungroup( ) %>% 
+  mutate( value = fct_reorder(value, n)) %>% 
+  ggplot(aes( x = value, y = n)) + 
+  geom_col() + 
+  facet_wrap( ~category, scale = "free_y") + 
+  coord_flip()
+
+
+
+
+```
+
+variety cant be used (subset of brand?)
+```{r}
+# To diverse 
+ramen_ratings %>% count(variety, sort = T)
+
+
+```
+
+### Lumping variables
+
+```{r}
+
+ramen_ratigs_processed <-   
+  ramen_ratings %>% 
+  # style only 4 levels
+  mutate( style = fct_lump(style, n = 4)) %>%
+  # remove na from style
+  replace_na(list(style = "Other")) %>% 
+  # Lump country. Only want 12 country
+  # brand only 10 brand.
+  mutate( brand = fct_lump(brand, 20), country = fct_lump(country, 12)) %>% 
+  # Sett the referent level. Use other as the ref.
+  mutate( brand = fct_relevel(brand, "Other"),
+          country = fct_relevel(country, "Other"),
+          # Relevel from Pack, sins Pack is the most command.
+          style = fct_relevel(style, "Pack")) 
+  
+
+
+  
+ramen_ratigs_processed %>% 
+  gather(category, value,  -review_number, -stars) %>% 
+  count( category, value) %>% 
+  group_by( category) %>% 
+  top_n( 16, n ) %>% 
+  ungroup( ) %>% 
+  mutate( value = fct_reorder(value, n)) %>% 
+  ggplot(aes( x = value, y = n)) + 
+  geom_col() + 
+  facet_wrap( ~category, scale = "free_y") + 
+  coord_flip() +
+  labs( title = "categorical predictor(after prosessed)", x = "predicter", y  = "count")
+
+
+```
+
+
+## Linear regression
+
+```{r}
+library(broom)
+lm( stars~ brand + country + style , ramen_ratigs_processed ) %>% 
+  # Tidy the result from the model up, 
+  # include the conf. to make the errorbars
+  tidy(conf.int = T ) %>%
+  filter( term != "(Intercept)") %>% 
+  mutate( term = fct_reorder(term, estimate )) %>% 
+  # arrange according to the estimate with the biggest impact.
+  arrange(desc(estimate)) %>% 
+  ggplot( aes(estimate, term ) ) + 
+  geom_point() +
+  geom_errorbarh( aes( xmin = conf.low, xmax = conf.high)) +
+  labs(
+    title = "estimated effect on ramen rating",
+    x = "Estimated effect on ramen ratings",
+    subtitle =  "Command brands, country and styles were lumped into Other"
+  )
+
+
+```
+
+
+
+```{r}
+lm( stars~ brand + country + style , ramen_ratigs_processed ) %>% 
+  #
+  #
+  tidy(conf.int = T ) %>%
+  filter( term != "(Intercept)") %>% 
+  mutate( term = fct_reorder(term, estimate )) %>% 
+  arrange(desc(estimate)) %>% 
+  # Extract - the term text into two column:
+  # The split is with a upper letter in the middel of the termword-
+  extract( term, c("category", "term"),  "^([a-z]+)([A-Z].*)" ) %>% 
+  mutate( term = fct_reorder(term, estimate )) %>% 
+  ggplot( aes(estimate, term , color  = category) ) + 
+  geom_point() +
+  geom_errorbarh( aes( xmin = conf.low, xmax = conf.high)) +
+  facet_wrap( ~ category, ncol = 1, scales = "free_y" ) +
+  geom_vline( lty = 2, xintercept = 0) +
+  theme( legend.position = "none") +
+  labs(
+    title = "estimated effect on ramen rating",
+    x = "Estimated effect on ramen ratings",
+    subtitle =  "Command brands and  country  were lumped together as the referance level. " 
+  )
+
+# Exampe interpret:
+# UK vietnam does not differ to the the "Other" (which is the reference level).
+
+```
+
+## unnest_tokines
+
+
+```{r}
+library(tidytext)
+
+ramen_ratigs_processed %>% 
+  filter( !is.na(stars)) %>% 
+  unnest_tokens(word, variety) %>% 
+  #count(word, sort = T)
+  group_by( word) %>% 
+  summarise( avg_stars= mean(stars) ,
+             n = n()
+             ) %>% 
+  arrange(desc(n))
+
+
+```
+
+ - Should have don a lasso-regression on this data.  See the wine predic. film to see lasso-regression. 
+
+22 min.
+
+## Web-scraping.
+
+
+
+
+
+## Extra: rebus-quiz
+
+
+```{r}
+# char_class( START %R% char_class( lower( ) ) %R% char_class( upper() )%R% ANY_CHAR )
+```
+
+
+
