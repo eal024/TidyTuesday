@@ -179,6 +179,10 @@ ramen_ratigs_processed %>%
 
 ## Web-scraping.
 
+```{r}
+library(rvest)
+
+```
 
 
 
