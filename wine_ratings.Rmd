@@ -1,0 +1,624 @@
+---
+title: "WineRatings"
+author: "D.R"
+date: "9/27/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## tidyTuesday, Wine ratings
+
+
+
+```{r}
+library(tidyverse);theme_set(theme_light());
+wine_ratings <- readr::read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2019/2019-05-28/winemag-data-130k-v2.csv") %>% 
+  select(-X1) %>% 
+  #extract( title , "year","(\\d\\d\\d\\d)", convert = T, remove = FALSE)
+  # the first digits must be 1 or 2
+  #extract( title , "year","([12][90]\\d\\d)", convert = T, remove = FALSE) %>% 
+  extract( title , "year","(20\\d\\d)", convert = T, remove = FALSE) %>% 
+  mutate( year = ifelse(year < 1900, NA, year)) %>% 
+  filter( ! is.na(price))
+
+
+library(rebus);
+#(DGT %R% DGT %R% DGT %R% DGT)
+```
+
+want a model to predict points by description
+
+```{r first_look}
+wine_ratings %>% 
+  count(country, sort = T)
+
+# 
+wine_ratings %>% 
+  count(designation, sort = T)
+
+#
+wine_ratings %>% 
+  count(taster_name, sort = T)
+
+
+wine_ratings %>% 
+  filter( !is.na(designation)) %>% 
+  count(variety,designation,  sort = T)
+
+
+  
+  
+
+```
+
+Plot distribution to year
+
+```{r distributions}
+
+wine_ratings %>% 
+  ggplot( aes(year)) + geom_histogram()
+
+
+wine_ratings %>% 
+  ggplot( aes(points)) + geom_histogram( binwidth = 1)
+
+
+wine_ratings %>% 
+  ggplot( aes(price)) + geom_histogram() + scale_x_log10()
+```
+
+Points is normal-distrib. price is logarithmically. In a predicition, price need to be log-scaled. 
+
+
+### What is correleted?
+
+```{r}
+wine_ratings %>% 
+  ggplot( aes( price, points)) +
+  geom_smooth( method = "lm") + 
+  geom_point(alpha = 0.1) + scale_x_log10()
+
+```
+Interpretion of the model: Everytimes the price double, the poits go up by 1.97. Look at the model. 
+
+Look at what log vs. log2 is:::
+
+Adding one expl. x  at the time. Make plots in next section for evalu.
+
+```{r linear_model}
+wine_ratings %>% 
+  replace_na( list(taster_name = "Missing")  ) %>% 
+  # Relevel country to "ohter" : Only meaning to what the ceff is compr. to 
+  mutate( country = fct_relevel( fct_lump( country, 7), "Other" ) ) %>% 
+  # relevel to Missing
+  mutate( reviewer = fct_relevel(fct_lump( taster_name, 6)), "Missing"  ) %>% 
+  #  year doest make the prediction much better but it is signif.
+  lm(points ~log2(price) + country + year + reviewer, data = .)  %>% 
+  summary
+
+
+#lm( points ~ log2(price), wine_ratings ) %>% summary
+  
+```
+
+
+
+```{r}
+# This is not controlled for price
+wine_ratings %>% 
+  # Relevel country to "ohter" : Only meaning to what the ceff is compr. to 
+  mutate( country = fct_relevel( fct_lump( country, 7), "Other" ) ) %>% 
+
+  mutate( country = fct_reorder(country, points )) %>% 
+  ggplot( aes( country, points)) + geom_boxplot() +
+  coord_flip()
+
+# Year
+wine_ratings %>% 
+  group_by(year) %>% 
+  summarize(average_points = mean(points)) %>% 
+  ggplot( aes( year, average_points)) + geom_line()
+
+
+# Reviver:
+wine_ratings %>% 
+  mutate( reviewer = fct_reorder(fct_lump(taster_name, 10), points) ) %>% 
+  ggplot( aes( reviewer, points )) + geom_boxplot() + coord_flip()
+  
+
+
+```
+
+
+### Libary broom
+
+```{r estimate_plot_broom}
+
+library(broom)
+
+wine_ratings %>% 
+  replace_na( list(taster_name = "Missing")  ) %>% 
+  # Relevel country to "ohter" : Only meaning to what the ceff is compr. to 
+  mutate( country = fct_relevel( fct_lump( country, 7), "Other" ) ) %>% 
+  # relevel to Missing
+  mutate( reviewer = fct_relevel(fct_lump( taster_name, 6)), "Missing"  ) %>% 
+  #  year doest make the prediction much better but it is signif.
+  lm(points ~log2(price) + country + year + reviewer, data = .)  %>% 
+  tidy() %>%
+  filter(term != "(Intercept)") %>% 
+  ggplot( aes( x = fct_reorder(term, estimate),  y = estimate  )) + 
+  geom_point() + coord_flip()
+
+
+
+```
+
+
+```{r}
+model <- 
+  wine_ratings %>% 
+  replace_na( list(taster_name = "Missing", country = "Missing")  ) %>% 
+  # Relevel country to "ohter" : Only meaning to what the ceff is compr. to 
+  mutate( country = fct_relevel( fct_lump( country, 7), "Other" ) ) %>% 
+  # relevel to Missing
+  mutate( reviewer = fct_relevel(fct_lump( taster_name, 6)), "Missing"  ) %>% 
+  #  year doest make the prediction much better but it is signif.
+  lm(points ~log2(price) + country + year + reviewer, data = .)  
+
+model %>% 
+  tidy( conf.int = T) %>%
+  mutate( 
+    term = str_replace( term, "country", "Country: "),
+    term = str_replace( term, "reviewer", "Taster: "),
+    term = fct_reorder(term, estimate)) %>% 
+  filter(term != "(Intercept)") %>% 
+  ggplot( aes( estimate, term)) + 
+  geom_point() + 
+  geom_errorbarh( aes(xmin = conf.low, xmax = conf.high))
+```
+
+From the plots: 
+- Every year the estimate/points go up
+- Reviwer Micheal descrimin. and give lower estimate.
+- France have lower score relative to US.
+- Spain has a good infl.
+- 
+
+### Use more of the data
+
+-  Look at R2.
+
+Augment: Actual point with fitted/ fit the model
+
+```{r augment} 
+model %>%  summary
+
+# Fit the model to the data: 
+broom::augment(model)
+
+model %>% 
+  augment( data = wine_ratings)
+
+# Tells how prediction is comp. to acctual values. 
+# The price drive the variation a lot.
+model %>% 
+  augment( data = wine_ratings) %>% 
+  ggplot( aes(.fitted, points)) + geom_point(alpha = 0.1)
+  
+  
+
+```
+
+### Anova
+
+sumsq: How much of the variance is explained. 
+
+- log2price -> explain 37% of the variation.
+ 
+
+```{r anova}
+
+anova(model)
+
+
+tidy(anova(model)) %>% 
+  mutate( sumsq/sum(sumsq))
+
+# 
+
+
+```
+
+- Worked trh. a linear model
+
+
+
+## Lasso regression on words in description
+
+```{r}
+library(tidytext);
+# one word for one row
+
+more_stop_words <- c("wine", "drink")
+wine_raing_words <- 
+  wine_ratings %>% 
+  mutate( wine_id = row_number() ) %>% 
+  unnest_tokens(word, description ) %>% 
+  anti_join( stop_words, by = "word") %>% 
+  filter( !word %in% more_stop_words)
+  
+
+
+# Have look at the words.
+wine_raing_words %>% 
+  count( word, sort = T)
+
+```
+
+```{r count_most_used_words}
+
+wine_raing_words %>% 
+  count(word, sort = T) %>% 
+  head( 20) %>% 
+  mutate( word = fct_reorder(word, n)) %>% 
+  ggplot( aes(word, n)) +
+  geom_col() +
+  coord_flip()
+
+```
+
+
+```{r}
+
+library(widyr);
+
+wine_rating_words_cors <- 
+  wine_raing_words %>% 
+  distinct(wine_id, word) %>% 
+  add_count( word) %>% 
+  filter( n >= 100) %>% 
+  pairwise_cor(word, wine_id, sort = T)
+  
+  
+wine_words_filtered <- 
+  wine_raing_words %>% 
+  distinct(wine_id, word) %>% 
+  add_count( word) %>% 
+  # filter out must be more than 100 obs. and at least on letter
+  filter( n >= 100, str_detect(word, "[a-z]"))  
+  
+
+
+```
+
+
+Go to chapter 4.2 in textmining and look at the graph
+
+```{r reg_score_based_on_words}
+library(Matrix)
+
+wine_word_matrix <-
+  wine_words_filtered %>% 
+  cast_sparse( wine_id, word)
+
+head(wine_word_matrix)
+
+wine_ids <- as.integer(rownames(wine_word_matrix));
+scores <-  wine_ratings$points[wine_ids];
+
+
+```
+
+```{r}
+library(glmnet)
+
+# Sparse regression.
+
+glmnet_model <- glmnet(wine_word_matrix, scores)
+
+tidy(glmnet_model)
+```
+
+Lasso regression: Fitting a linearmodel. 
+
+LM - wil be overfitted.
+- add words, and than the param changes.
+
+Graf viser hvordan koeffisientene endres når Lamda reduseres.
+Med Lamda reduseres, desto flere og flere term blir lagt til.
+Hvordan lambda reduseres flere og flere term blir tatt med.
+*Sparesemethod: Forventer at fleste term skal bli 0, helt til de ikke er.
+Ettersom panelty increase, the risk for over overfitting dec
+
+```{r}
+# This part is later moved to a appendix- "What is glmnet -model."
+glmnet_model <- glmnet(wine_word_matrix, scores)
+glmnet_model %>% 
+  tidy() %>% 
+  filter( term %in% c("rich", "black", "simple", "complex", "vineyard", "concentrated")) %>% 
+  ggplot( aes(lambda, estimate, color = term)) + 
+  geom_line() +
+  scale_x_log10() +
+  geom_hline( lty = 2, yintercept =  0)
+
+```
+
+How many terms are there?
+avveiening.
+How pick a Lamda?
+
+
+Høy Landa, kun intercept. ved icreaedse, 4
+```{r}
+glmnet_model %>% 
+  tidy() %>% 
+  count( lambda) %>% 
+  ggplot( aes( lambda, n)) +
+  geom_line()+
+  scale_x_log10()
+  
+
+```
+
+
+
+```{r}
+
+cv_glmnet_model <- cv.glmnet(wine_word_matrix, scores)
+
+
+plot(cv_glmnet_model)
+
+```
+
+Increase the size of data, from n > 100,
+
+```{r}
+
+dim(wine_word_matrix); 
+
+```
+
+Speed up the proses, use paralell , and the packages doC
+
+```{r}
+library(doMC)
+
+registerDoMC( cores = 4);
+
+# cv_glmnet_model <- cv.glmnet(wine_word_matrix, scores, parallel = T)
+cv_glmnet_model <- cv.glmnet(wine_word_matrix, scores)
+
+plot(cv_glmnet_model)
+
+```
+Når kurven begynner å bevege seg oppover indikerer dette at  "straffen" at fitt blir verre.
+
+### Add price into the regression
+
+Since price have 
+
+```{r add_price_to_regression}
+
+wine_ids <- as.integer(rownames(wine_word_matrix));
+scores <-  wine_ratings$points[wine_ids];
+
+# Add price to the matrix
+wine_word_matrix_extra <- cbind(wine_word_matrix, log_price = log2( wine_ratings$price[wine_ids]) )
+
+
+dim(wine_word_matrix);
+
+# SKal være en extra.
+dim(wine_word_matrix_extra)
+
+# Should be non NA
+wine_word_matrix_extra[, "log_price"]
+# Finner ut her at vi går tilbake å filter ut price som er NA. Dette gjør vi i første steg. Går tilbake og filter. Dette er en avveining hver gang om NA skal slettes.
+
+```
+
+### Hvor ledere dette?
+
+Choose the Lambda for you: 
+```{r}
+# choice of Lambda:
+
+cv_glmnet_model$lambda.1se
+
+# This is don by:
+cv_glmnet_model$glmnet.fit %>% 
+  tidy() %>% 
+  filter(lambda ==  cv_glmnet_model$lambda.1se) %>% 
+  filter( term != "(Intercept)")
+  
+
+# Tolkning Intercept _ "Vi starter ved estimate 85 - deretter opp og ned".
+# Deretter ripe -> bidrar positivt
+# fruity bidrar negativt
+
+```
+
+
+
+```{r WHat_word_contrib_most}
+
+# Did miss the word extra! In extra is price included:
+
+cv_glmnet_model <- cv.glmnet(wine_word_matrix_extra, scores)
+
+cv_glmnet_model$glmnet.fit %>% 
+  tidy() %>% 
+  filter(lambda ==  cv_glmnet_model$lambda.1se) %>% 
+  filter( term != "(Intercept)") %>% 
+  arrange( desc(estimate))
+
+# Immense contrib. most !!!
+
+```
+
+Including price in the model create a new plot(cv_glmnet_model). The plots tell that price in its self give a good prediction.
+
+
+```{r}
+plot(cv_glmnet_model)
+```
+
+This is confirmed with:
+
+```{r}
+cv_glmnet_model$glmnet.fit %>% 
+  tidy() %>% 
+  filter(lambda ==  cv_glmnet_model$lambda.1se) %>% 
+  filter( term != "(Intercept)") %>% 
+  arrange( desc(estimate)) %>% 
+  filter(term == "log_price")
+
+# Words that decrease the rating.
+cv_glmnet_model$glmnet.fit %>% 
+  tidy() %>% 
+  filter(lambda ==  cv_glmnet_model$lambda.1se) %>% 
+  filter( term != "(Intercept)") %>% 
+  arrange( (estimate)) 
+  
+
+
+```
+Price koeffisienten 1.19,som er mindre enn noen av ordene. Dette må sees opp i mot hva delta 1 log price tilsvarer i økning i pris vs. ord som er 1 eller 0.
+
+
+## Coeff. plot
+```{r}
+
+# cv_glmnet_model$glmnet.fit %>% 
+#   tidy() %>% 
+#   filter(lambda ==  cv_glmnet_model$lambda.1se) %>% 
+#   filter( term != "(Intercept)",
+#           term != "log_price" )  %>% #Just as a control. Want to look at what words, not price 
+#   arrange( (estimate)) %>% 
+#   group_by( direction = ifelse( estimate  < 0 , "Negative" , "Positive") ) %>% 
+#   top_n(10, abs(estimate)) %>% 
+#   ungroup() %>%  # Look at at the estimate in abs. values
+#   mutate( term = fct_reorder(term, estimate)) %>% 
+#   ggplot( aes( term, estimate , fill = direction )) + geom_col( ) + coord_flip()
+
+# Adjustment  
+
+lexicon <- cv_glmnet_model$glmnet.fit %>% 
+  tidy() %>% 
+  filter(lambda ==  cv_glmnet_model$lambda.1se) %>% 
+  filter( term != "(Intercept)",
+          term != "log_price" )  %>% 
+  select(word = term, coefficient = estimate)
+
+lexicon %>% #Just as a control. Want to look at what words, not price 
+  arrange( (coefficient)) %>% 
+  group_by( direction = ifelse( coefficient  < 0 , "Negative" , "Positive") ) %>% 
+  top_n(16, abs(coefficient)) %>%  # Nyttig: Flilterer topp-ord fra abs, slipper å cbind
+  ungroup() %>%  # Look at at the estimate in abs. values
+  mutate( word = fct_reorder(word, coefficient)) %>% 
+  ggplot( aes( word, coefficient , fill = direction )) + geom_col( ) + coord_flip() +
+  labs( y = "Estimate effect of words on the revi. points on wine", "", 
+        title =  "What words are predictive of a wines socre")
+
+```
+
+Why name word, coeff. to lexicon ? Can se how different words in description contrip, to points:
+
+```{r}
+wine_raing_words %>% 
+  filter( wine_id == 1 ) %>% 
+  select(word, points) %>% 
+  inner_join( lexicon)
+
+```
+
+Example two
+
+```{r}
+wine_ratings %>% 
+  mutate( wine_id = row_number()) %>% 
+  arrange(points) %>% 
+  head(1) %>% 
+  select(wine_id, description)  %>% 
+ pull()
+
+
+
+wine_raing_words %>% 
+  filter( wine_id == 319) %>% 
+  select(word, points) %>% 
+  inner_join( lexicon)
+
+```
+
+FOr any wine we can say what were the + and - words in the revi. 
+```{r}
+wine_raing_words %>% 
+  filter( wine_id == 319) %>% 
+  select(word, points) %>% 
+  inner_join( lexicon) %>% 
+  mutate( word = fct_reorder(word, coefficient)) %>% 
+  ggplot( aes(word, coefficient)) + 
+  geom_col() +
+  coord_flip()
+```
+
+
+### Create a plot with 4 random wine
+
+```{r}
+
+set.seed(41)
+
+wine_raing_words %>% 
+  filter( wine_id %in% sample(unique(wine_id), 4)) %>% 
+  distinct(word, title,  points) %>% # problem with fct_reorder
+  mutate(wine = str_c( str_trunc(title, 20 ), "(", points, ")" )) %>% 
+  inner_join( lexicon) %>% 
+  mutate( word = fct_reorder(word, coefficient)) %>% 
+  ggplot( aes(word, coefficient, fill = coefficient > 0)) + 
+  geom_col( show.legend =  FALSE) +
+  coord_flip() +
+  facet_wrap( ~wine, scale = "free_y") + 
+  labs( title = "How a lasso regression will predict each wine score", subtitle = "Using a Lasso regression with a extra term for price",  y = "Effect on score")
+  
+
+
+```
+
+
+
+### Appeindix
+
+What is glmnet model:
+```{r}
+
+#glmnet_model <- glmnet(wine_word_matrix, scores)
+
+#glmnet_model %>% 
+# eqvivlant
+
+cv_glmnet_model$glmnet.fit %>% 
+ tidy() %>% 
+  filter( term %in% c("rich", "black", "simple", "complex", "vineyard", "concentrated")) %>% 
+  ggplot( aes(lambda, estimate, color = term)) + 
+  geom_line() +
+  scale_x_log10() +
+  geom_hline( lty = 2, yintercept =  0)
+
+
+
+cv_glmnet_model$glmnet.fit %>% 
+  tidy() %>% 
+  count(lambda) %>% 
+  ggplot( aes(lambda, n)) +
+  geom_line() +
+  scale_x_log10()
+
+```
+
+
