@@ -1,0 +1,158 @@
+---
+title: "pizza_rating"
+author: "Eirik Lamøy"
+date: "10/6/2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Pizza_rating
+
+```{r}
+library(tidyverse)
+theme_set(theme_light())
+
+```
+
+
+[Github]https://github.com/rfordatascience/tidytuesday/tree/master/data/2019/2019-10-01, were the data is downloaded.
+
+```{r import_data}
+pizza_jared <- readr::read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2019/2019-10-01/pizza_jared.csv")
+pizza_barstool <- readr::read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2019/2019-10-01/pizza_barstool.csv")
+pizza_datafiniti <- readr::read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2019/2019-10-01/pizza_datafiniti.csv")
+
+```
+
+
+```{r look_at_jared}
+
+pizza_jared %>% 
+  count( place, question , sort = T)
+
+# Fair: only 1, sign of messy data
+pizza_jared %>% 
+  count( answer , sort = T)
+
+# Sort by time and place _ each has 5 obs
+pizza_jared %>% 
+  count(place, time , sort  = T)
+
+```
+
+
+```{r mutate_time}
+
+answer_order <- c("Never Again", "Poor", "Average", "Good", "Excellent")  
+
+by_places <-
+  pizza_jared %>% 
+  mutate( time = as.POSIXct(time, origin = "1970-01-01"),
+          date = as.Date(time)) %>% 
+  # To add number to factor answer -> the fct_ need to be before group_by
+  mutate(  answer = fct_relevel(answer, answer_order)) %>% 
+  group_by( place, question, answer ) %>% 
+  summarise( votes = sum(votes)) %>% 
+  mutate( total = sum(votes)) %>% 
+  mutate( percent = votes / total ) %>% 
+    mutate( answer = fct_relevel(answer, answer_order),
+            answer_integer = as.integer(answer) ,
+            average = sum( answer_integer * percent)) %>% 
+  ungroup()
+
+
+# from fct_relever -> can now : fct_reorder - by average
+# Places are now ordered by average rated. Prince street has the lowest. Willamsbyrg has the heighets.
+by_places %>% 
+  filter( total > 29) %>% 
+  mutate( place = fct_reorder(place, average)) %>% 
+  ggplot( aes( x = answer, y =  percent) ) + 
+  geom_col()+
+  facet_wrap( ~ place) + 
+  scale_y_continuous( labels =scales::percent ) +
+  theme( axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs( y = "% of the respondents", title = "What is the most popular pizza in open stats meetup?", 
+        subtitle =  "Only the 9 pizza places with respondes")
+
+```
+
+
+Trixs: Want a number to facet:
+
+```{r}
+
+by_places %>% 
+  # place order by total, in descended order: filter 9
+  filter( as.integer( fct_reorder( place, total, .desc = T)) <=  16 ,
+          answer != "Fair") %>%   
+  mutate( place = glue::glue("{ place } ({ total })"),
+    place = fct_reorder(place, average)) %>% 
+  ggplot( aes( x = answer, y =  percent) ) + 
+  geom_col()+
+  facet_wrap( ~ place) + 
+  scale_y_continuous( labels =scales::percent ) +
+  theme( axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs( y = "% of the respondents", title = "What is the most popular pizza in open stats meetup?", 
+        subtitle =  "Only the 9 pizza places with respondes")
+  
+  
+  
+```
+
+### Statistical test
+
+Want to get a statical 
+
+Weighted Lm
+
+```{r}
+library(broom)
+
+
+# Lm with only the intercept
+tidy(lm(c(2,4,4,5) ~1, conf.int = T))
+
+# This doesnt work
+tidy(lm(c(2,4,4,5) ~1, weights = c(1,3,10,20,15) ,conf.int = T))
+  
+  
+t_test_repeated <- function(x, frequency) {
+ tidy( t.test(rep(x, frequency)) )
+}
+
+t_test_repeated(c(1,2,3,4,5), c(100, 300, 100, 200, 150))
+
+# Worst to best
+
+# ALternativ graoh: Good for displ. the distribution
+by_places %>% 
+  filter(total >= 3) %>% 
+  group_by(place, total) %>% 
+  summarise( t_test_result = list(t_test_repeated(answer_integer, votes))) %>% 
+  ungroup() %>% 
+  unnest( t_test_result) %>% 
+  select(place,  total ,average = estimate, low = conf.low, high = conf.high ) %>% 
+  top_n(15, total) %>% 
+  mutate( #place = glue::glue("{ place } ({ total })"),
+          place = fct_reorder(place, average)) %>% 
+  ggplot( aes( average,place)) + 
+  geom_point( aes(size = total) ) +
+  geom_errorbarh( aes(xmin = low, xmax = high )) +
+  labs( x = "Average score (1-5) Liker scale", title = "What is the most popular pizza in open stats meetup?",
+        subtitle =  "Only the 16 pizza places with the most respondents. # respond. show in parentes.", 
+        size = "# Number of respondents")
+
+```
+
+
+
+
+
+
+
+
