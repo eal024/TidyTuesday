@@ -31,7 +31,7 @@ pizza_datafiniti <- readr::read_csv("https://raw.githubusercontent.com/rfordatas
 
 
 ```{r look_at_jared}
-
+# Five answ. per place. Multipl. quest.
 pizza_jared %>% 
   count( place, question , sort = T)
 
@@ -46,11 +46,20 @@ pizza_jared %>%
 ```
 
 
+Aggreage per places:
+create new dataset
+
+create a plot: What is the most pop pizza places
+
+Se på hvordan omgjør faktorer til integer.
+Dette gjør det å reordre pizza-plassene mht. factor.
+
+
 ```{r mutate_time}
 
 answer_order <- c("Never Again", "Poor", "Average", "Good", "Excellent")  
 
-by_places <-
+by_places_answer <-
   pizza_jared %>% 
   mutate( time = as.POSIXct(time, origin = "1970-01-01"),
           date = as.Date(time)) %>% 
@@ -60,7 +69,7 @@ by_places <-
   summarise( votes = sum(votes)) %>% 
   mutate( total = sum(votes)) %>% 
   mutate( percent = votes / total ) %>% 
-    mutate( answer = fct_relevel(answer, answer_order),
+  mutate( answer = fct_relevel(answer, answer_order),
             answer_integer = as.integer(answer) ,
             average = sum( answer_integer * percent)) %>% 
   ungroup()
@@ -68,7 +77,7 @@ by_places <-
 
 # from fct_relever -> can now : fct_reorder - by average
 # Places are now ordered by average rated. Prince street has the lowest. Willamsbyrg has the heighets.
-by_places %>% 
+by_places_answer %>% 
   filter( total > 29) %>% 
   mutate( place = fct_reorder(place, average)) %>% 
   ggplot( aes( x = answer, y =  percent) ) + 
@@ -83,10 +92,10 @@ by_places %>%
 
 
 Trixs: Want a number to facet:
-
+In parant is numer of answer.
 ```{r}
 
-by_places %>% 
+by_places_answer %>% 
   # place order by total, in descended order: filter 9
   filter( as.integer( fct_reorder( place, total, .desc = T)) <=  16 ,
           answer != "Fair") %>%   
@@ -129,8 +138,8 @@ t_test_repeated(c(1,2,3,4,5), c(100, 300, 100, 200, 150))
 
 # Worst to best
 
-# ALternativ graoh: Good for displ. the distribution
-by_places %>% 
+# Alt graoh to the first (above): Good for displ. the distribution
+by_places_answer %>% 
   filter(total >= 3) %>% 
   group_by(place, total) %>% 
   summarise( t_test_result = list(t_test_repeated(answer_integer, votes))) %>% 
@@ -147,12 +156,136 @@ by_places %>%
         subtitle =  "Only the 16 pizza places with the most respondents. # respond. show in parentes.", 
         size = "# Number of respondents")
 
+
+# can now inner join by place
+by_place <- by_places_answer %>% 
+  distinct(place, total, average)
+  
+
+
+```
+
+
+### Data set: pizza barstols
+- Dont have std. Cant make a plot like above.
+
+```{r}
+# Do we have doplicate?
+pizza_barstool %>%
+  count(place, sort = T)
+
+# No corr. Dont comparing them, this is a bad graph
+pizza_barstool %>% 
+  select( place = name,
+          barstool_total = review_stats_all_count,
+          barstool_average = review_stats_all_average_score) %>% 
+  inner_join( by_place, by = "place") %>%
+  #count( place, sort = T) # Doplicat: Joe`s Pizza. n = 3
+  group_by( place) %>% 
+  filter( n() == 1) %>% 
+  ungroup() %>% 
+  filter( barstool_total >= 5,
+          total >= 5) %>% 
+  ggplot( ) + 
+  aes( average, barstool_average) +
+  geom_point() +
+  labs( x = "Meetup", y = "Barstool")
+  
+
+```
+
+
+## Only look at the barstool data
+ 
+ 
+```{r}
+pizza_barstool %>% 
+  top_n( 50, review_stats_all_count) 
+
+pizza_barstool %>% 
+  top_n( 50, review_stats_all_count) %>% 
+  ggplot( ) +
+  aes( price_level , review_stats_all_average_score, group = price_level) +
+  geom_boxplot()
+   
+
+```
+Billige er bra og dyr. De som er i mellom har lavere score.
+
+
+```{r}
+
+
+pizza_barstool %>% 
+  filter( review_stats_all_count >= 50) %>% 
+  top_n(30, review_stats_all_count) %>%
+  mutate( name = fct_reorder( name,review_stats_all_average_score )) %>% 
+  ggplot() +
+  aes(
+    review_stats_all_average_score ,
+    name,
+    size = review_stats_all_count
+  ) + geom_boxplot() + labs(x = "Average rating", y = "", size = "# of reviews", title = "Barstool sports rating of pizza places. Only places at least 50 reviews")
+
+
+```
+
+What is the different between cities?
+
+```{r}
+pizza_barstool %>% 
+  filter( review_stats_all_count >= 20) %>%
+  add_count(city) %>%  
+  filter( n  >= 6) %>%  
+  ungroup( ) %>% 
+  mutate( city = glue::glue("{ city } ({ n })")) %>% 
+  ggplot( aes( city, review_stats_all_average_score)) +
+  geom_boxplot() +
+  labs( subtitle =  "Only pizza places with at least 20 reviews")
 ```
 
 
 
+```{r}
+pizza_clean <- 
+  pizza_barstool %>% 
+  # Denne må tas bort for scatter-plot (stage 2)
+  #filter( review_stats_all_count >= 50) %>% 
+  select( place = name, 
+          contains("review")) %>% 
+  rename_all(~str_remove(., "review_stats_")) %>% 
+  select(-contains("provider") ) 
+
+pizza_clean %>% 
+  filter( critic_count > 0 ) %>% 
+  # For å få en oversikt over variablene:
+  # select( contains("count")) %>% 
+  # gather( key, value) %>% 
+  # ggplot( aes(value)) +
+  # geom_histogram()+
+  # facet_wrap(~ key)
+  ggplot( aes(critic_average_score, dave_average_score)) +
+  geom_smooth( method =  "lm", se = T) +
+  # The red line indixate 1:1 from y = 0, x = 0
+  geom_abline( color = "red") +
+  geom_point() +
+  # + coord_cartesian(xlim =  c(0, 12), ylim = c(0,12))
+  labs( title = "Does Barstool sports dave agree with the critics?",
+        x = "Crtical Averave score", y = "Dave score")
+
+```
 
 
-
+```{r}
+pizza_clean %>%
+  filter(community_count >= 20) %>%
+  ggplot(aes(community_average_score,  dave_average_score)) +
+  geom_point( aes( size = community_count)) +
+  geom_abline(color = "red") +
+  geom_smooth(method =  "lm") +
+  labs("of community score", y = "Dave score")
+  
+  
+```
 
 
