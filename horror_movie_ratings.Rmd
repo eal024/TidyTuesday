@@ -1,0 +1,440 @@
+---
+title: "horror movie ratings"
+author: "Eirik Lamøy"
+date: "3 11 2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse);library(lubridate)
+
+theme_set( theme_light())
+```
+
+## Start, import and a first look
+
+```{r}
+horror_movies_raw <- readr::read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2019/2019-10-22/horror_movies.csv")
+
+
+
+```
+
+
+```{r cleaning_data}
+
+# The release data dont mach the title year 
+horror_movies %>% mutate(release_date_new = dmy(release_date))
+
+horror_movies <-
+  horror_movies_raw %>% 
+  arrange( desc( review_rating)) %>% 
+  extract( title, "year", "\\((\\d\\d\\d\\d)\\)$", remove = FALSE, convert = T) %>% 
+  #filter(is.na(year) ) %>% 
+  # Which year are the ratings from?
+  #filter( year > 2005) %>% 
+  # Have a look at the distribution
+  #ggplot( aes(year) ) + geom_histogram()
+  mutate( budget2 = parse_number(budget)) %>% 
+  separate( plot, c("director", "cast_sentence", "plot"), extra = "merge", sep = "\\. ", fill = "right") %>% 
+  # VIKTIG! Ønsker ikke at filmer skal duplikeres inn i datasettet:
+  distinct(title, .keep_all = TRUE)
+
+
+
+```
+Most of the moives are after 2012.
+
+```{r}
+
+
+horror_movies %>% glimpse()
+
+
+horror_movies %>% distinct(release_country) 
+
+horror_movies %>% count(release_country, sort = T) 
+
+horror_movies %>% count(language, sort = T  )
+
+horror_movies %>% 
+  count( genres, sort = T)
+
+horror_movies %>% 
+  arrange(desc(review_rating )) %>% View()
+
+
+
+```
+
+What kind of budget cant be parsed? - Only those who is NA!  Thats good.
+
+```{r}
+horror_movies %>% 
+  filter(is.na(budget2)) %>% count(budget)
+  
+
+
+```
+
+Look at the distr. of budget
+```{r}
+horror_movies %>% 
+  ggplot( aes(x = budget2) ) + 
+  geom_histogram() +
+  # Alt på log axe
+  scale_x_log10( labels = scales::dollar  )
+
+
+```
+
+
+Do higher budget ends up in higher ratings?
+
+```{r}
+horror_movies %>% 
+  ggplot( aes( x= budget2, y = review_rating)) +
+  geom_point() +
+  scale_x_log10( labels = scales::dollar ) +
+  geom_smooth( method =  "lm" )
+
+
+```{r}
+horror_movies %>% 
+  lm(review_rating ~ log10(budget2), data = . ) %>% summary
+```
+
+No Trends between moiveratings and budget. How about moive ratings and review:
+
+
+```{r}
+# What do we got here?
+
+horror_movies %>% 
+  mutate( movie_rating = fct_lump( movie_rating, 5)) %>% 
+  #count( movie_rating, sort = T)
+  mutate( movie_rating = fct_reorder(movie_rating, review_rating, na.rm = T)) %>% 
+  ggplot( aes( x = movie_rating, y = review_rating)) +
+  geom_boxplot() + 
+  coord_flip()
+  
+
+
+```
+
+Analyse av variance. Er det forskjell mellom de ulike gruppene?
+(analyse av kategoriske variabler)
+```{r}
+library(broom)
+
+horror_movies %>% 
+  filter(!is.na(movie_rating)) %>% 
+  mutate( movie_rating = fct_lump( movie_rating, 5)) %>% 
+  #count( movie_rating, sort = T)
+  mutate( movie_rating = fct_reorder(movie_rating, review_rating, na.rm = T)) %>% 
+  lm( review_rating  ~ movie_rating , data = .) %>%  
+  anova()
+```
+
+
+- F-test: ***det er mer variasjon enn tilfeldig.
+- Andel forklart = 69/2260, som er en liten andel
+
+
+extract: What happends?
+```{r}
+
+
+horror_movies %>%
+  tidyr::separate_rows(genres ,  sep = "\\| ") %>%
+  #select( title, year, genres) %>%
+  mutate(genre = fct_lump(genres, 5)) %>%
+  ggplot(aes(genre,  review_rating)) +
+  geom_boxplot() +
+  coord_flip()
+
+  
+```
+
+
+## Text parsing
+
+```{r}
+# WHat is variable: plot?
+horror_movies %>% 
+  select(plot ) 
+
+# Separte to get plot in acolumn
+horror_movies %>% 
+  # fill: noen ganger har de ikke. Merge: mmore than 3 pices
+  separate( plot, c("director", "cast_sentence", "plot"), extra = "merge", sep = "\\. ", fill = "right")  %>% 
+  select(director, cast_sentence, plot) %>% 
+  head()
+
+# Get text - pull:
+library(tidytext);
+
+horror_movies_unnested <-
+  horror_movies %>% 
+  # fill: noen ganger har de ikke 
+  # Move this part into data transf. cleaning part
+  #separate( plot, c("director", "cast_sentence", "plot"), extra = "merge", sep = "\\. ", fill = "right")  %>% 
+  unnest_tokens( word, plot) %>% 
+  anti_join( stop_words, by = "word") %>% 
+  filter( !is.na(word))
+
+
+horror_movies_unnested %>% 
+  anti_join( stop_words, by = "word") %>% 
+  count(word, sort = T) 
+
+
+# Sammenheng mellom words and points
+horror_movies_unnested %>% 
+  filter( !is.na(review_rating)) %>% 
+  group_by( word) %>% 
+  summarise( movies = n(), avg_rating = mean(review_rating, na.rm = T)) %>% 
+  arrange( desc(movies)) %>% 
+  filter( movies >= 100)  %>%
+  mutate( word = fct_reorder( word, avg_rating)) %>% 
+  ggplot( aes(avg_rating, word)) +
+  geom_point()
+  
+```
+
+
+Is there some duplication?
+```{r}
+horror_movies %>% 
+  
+```
+
+
+
+## Lasso regression for predicting rwview rating based on words
+```{r}
+library(glmnet)
+library( Matrix)
+
+movie_word_matrix <-
+  horror_movies_unnested %>%
+  filter(!is.na(review_rating)) %>% 
+  add_count(word) %>%
+  # 1050 ord
+  #filter( n >= 10) %>% 
+  # 500 ord
+  filter( n >= 20) %>% 
+  #count(word)
+  count( title , word) %>% 
+  cast_sparse( title, word, n)
+  
+
+y <- horror_movies$review_rating[match( rownames(movie_word_matrix), horror_movies$title)] 
+
+rating <- horror_movies$review_rating[match( rownames(movie_word_matrix), horror_movies$title)] 
+
+qplot(y)
+
+# Denne skal finne en koeff. for hvert ord.
+lasso_model <- cv.glmnet(movie_word_matrix, rating)
+
+
+
+```
+
+Resultat
+
+Lambda er en straffe-variabel
+desto større lambda, om større gir kun intercept. Men når lambda er liten får ord (i denne sammenheng) koeff. som viser påvirkning. 
+
+```{r}
+lasso_model$glmnet.fit %>%
+  tidy() %>% 
+  filter(term %in% c("friend", "evil", "college", "haunted", "mother")) %>% 
+  ggplot( aes( lambda, estimate, color = term))+
+  geom_line(  ) +
+  scale_x_log10() +
+  geom_hline(yintercept = 0, lty = 2)
+
+
+
+
+
+
+
+```
+
+Grafen viser hvordan ord legges til (impact) ettersom lambda reduseres
+
+###Hvordan velge Lambda??
+Tolkning er:
+```{r}
+tidy(lasso_model$glmnet.fit)
+```
+
+Hvis valgt størrelse er 0.1, vil ord som friends, evil og college trekke fra hhv.0.00479, 0.029, 0.0541. Dette vil gi en modell som ikke predikerer stort.
+
+Så hvordan velge Lambda?
+Her er en metode (plot(lass_model)) corss.valid.model
+```{r}
+lasso_model$glmnet.fit %>%
+  tidy()
+
+plot(lasso_model)
+  
+
+
+```
+
+Starten går meas.sq.er ned, før den øker. Etter -4 vil modellen bli verre, enn kun å bruke intercept.
+
+kan ha inkludetr 460 ord. men ville ha blitt en mye verre predikering. 
+
+Minerig av lambda:
+```{r}
+lasso_model$lambda.min
+
+
+tidy(lasso_model$glmnet.fit) %>% 
+  filter(lambda == lasso_model$lambda.min, 
+         term != "(Intercept)") %>% 
+  mutate( term = fct_reorder( term, estimate )) %>%
+  ggplot( aes( term , estimate)) +
+  geom_col() +
+  coord_flip()
+```
+
+```{r}
+tidy(lasso_model$glmnet.fit) %>% 
+  filter(term %in% c("quickly", "seek", "army", "teacher", "unexpected") ) %>% 
+  ggplot( aes( lambda, estimate, color = term))+
+  geom_line(  ) +
+  scale_x_log10() +
+  geom_hline(yintercept = 0, lty = 2) +
+  # Valgt lambda valg
+  geom_vline( xintercept = lasso_model$lambda.min)
+
+
+
+```
+
+Små predikeringer, gjør at modellen ikke er presis.
+
+## Throwing everything into a linear model: director, cast, genre, rating, plot, word.
+
+```{r}
+lasso_model
+
+features_gm <- 
+  horror_movies %>% 
+  filter( !is.na(review_rating)) %>% 
+  select(title, genres, director, cast, movie_rating) %>% 
+  mutate( director = str_remove(director, "Directed by ")) %>% mutate( lengde_dir = length(director)) %>% arrange((lengde_dir)) 
+  # Få dire som går igjen
+  #count(director, sort = T)
+  gather( type, value, -title) %>% 
+  filter( !is.na(value)) %>% 
+  # | eller types (?)
+  separate_rows( value, sep = "\\| ?") %>% 
+  #count(type, value, sort = T )
+  unite( feature, type, value, sep = ": ") %>% 
+  # n = 1: Slik at det kan kobles til horror_movies_unnested -> uten duplikater 
+  mutate( n = 1)
+
+features <- horror_movies %>%
+  filter(!is.na(review_rating)) %>%
+  select(title, genres, director, cast, movie_rating, language, release_country) %>%
+  mutate(director = str_remove(director, "Directed by ")) %>%
+  gather(type, value, -title) %>%
+  filter(!is.na(value)) %>%
+  separate_rows(value, sep = "\\| ?") %>%
+  unite(feature, type, value, sep = ": ") %>%
+  mutate(n = 1)
+
+dim(features)
+dim(features_gm)
+  
+features
+
+dim(features)
+
+movie_feature_matrix <-
+  horror_movies_unnested %>% 
+  filter(!is.na(review_rating)) %>% 
+  count(title, feature = paste0("word: ",word) )%>% 
+  bind_rows( features) %>% 
+  add_count( feature) %>% 
+  filter( n >= 10) %>% 
+  cast_sparse( title, feature )
+
+dim(movie_feature_matrix)
+
+movie_feature_matrix <- horror_movies_unnested %>%
+  filter(!is.na(review_rating)) %>%
+  count(title, feature = paste0("word: ", word)) %>%
+  bind_rows(features) %>%
+  add_count(feature) %>%
+  filter(n >= 10) %>%
+  cast_sparse(title, feature)
+
+dim(movie_feature_matrix)
+
+
+head(movie_feature_matrix)
+
+dim(movie_feature_matrix)
+
+# Lager ny vektor med ratings
+rating <- horror_movies$review_rating[match(rownames(movie_feature_matrix), horror_movies$title)]
+
+hist(rating)
+
+
+```
+
+Now the matrix includes genres, director, cast and movie rating. Do Lasso-reg. as before:
+
+```{r}
+
+feature_lasso_model <- cv.glmnet(movie_feature_matrix, rating)
+
+
+```
+
+
+```{r}
+
+plot(feature_lasso_model)
+
+
+tidy(feature_lasso_model$glmnet.fit) %>% 
+  filter(lambda == feature_lasso_model$lambda.1se, 
+         term != "(Intercept)") %>% 
+  mutate( term = fct_reorder( term, estimate )) %>%
+  ggplot( aes( term , estimate)) +
+  geom_col() +
+  coord_flip() +
+  labs( x = "", y = "Coefficinet for predictin horror movie rating", title =  "What affects a horror movie rating?",
+        subtitle =  "Based on a lasso regresison to predict IMDb ratings of ~3000 movies")
+
+dim(movie_feature_matrix)
+
+```
+ 
+Kannada må mist ha vært deskr. språk i 10 filmer eller flere.
+
+Om modellen: Om en ikke innehar ordene lengst ute på aksen (eks. Kannada, Shark), vil ikke modellen være spesielt predikerende.
+
+What am I going to watch?
+```{r}
+horror_movies %>% 
+  filter(str_detect(genres, "Comedy"), !is.na(movie_rating), !is.na(budget2), movie_rating != "PG") %>% 
+  arrange( desc(review_rating)) %>% 
+  select(title, review_rating, plot, director, budget, language )
+
+```
+
