@@ -1,0 +1,306 @@
+---
+title: "analyzing_car_fuel_efficiency"
+author: "Eirik Lamøy"
+date: "16 11 2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+theme_set(theme_light())
+```
+
+## Car fuel efficiency
+
+
+```{r}
+# car effic
+#tidytuesdayR::tt_load(2019, week = 42)
+big_epa_cars <- readr::read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2019/2019-10-15/big_epa_cars.csv") %>% janitor::clean_names() %>% 
+  mutate( uses_electricity = ifelse(highway_e > 0, "Uses Electricity", "Doesn`t Use Electricity" ) )
+```
+
+
+```{r}
+big_epa_cars <-
+  big_epa_cars %>% 
+  select( sort(colnames(big_epa_cars)) )
+
+
+big_epa_cars1 <-
+  big_epa_cars %>% 
+  # city08: city mile per galion
+  select(model, make, v_class ,uses_electricity ,city08, highway08, cylinders, displ, drive, eng_id, eng_dscr, city_e, city_a08 , year, guzzler )
+
+
+```
+
+
+Mer effektiv i by enn på landevei?
+
+```{r}
+big_epa_cars1 %>% 
+  ggplot( aes(highway08, city08, color = uses_electricity)) + 
+  geom_point() +
+  geom_abline( color = "red") +
+  facet_wrap( ~uses_electricity, scales = "free" ) +
+  expand_limits( x = 0, y = 0) +
+  labs( x = "Highways MPG", y = "City MPG", title = "How does fule efficiency differ between city + highway") +
+  theme( legend.position = "none")
+
+```
+
+
+
+```{r}
+big_epa_cars1 %>% 
+  # Non electricity
+  filter( city_e == 0) %>% 
+  # Based on observation
+  mutate( v_class = fct_lump(v_class, 8)) %>% 
+  mutate( drive = fct_reorder(v_class, city08)) %>% 
+  ggplot( ) +
+  aes(x = drive , y = city08 ) +
+  geom_boxplot() +
+  coord_flip() 
+
+
+```
+
+
+```{r}
+big_epa_cars1 %>%
+  # Non electricity
+  filter(city_e == 0, !is.na(cylinders)) %>%
+  # Based on observation
+  ggplot() +
+  aes(x = factor(cylinders) , y = city08) +
+  geom_boxplot()  
+
+
+big_epa_cars1 %>%
+  # Non electricity
+  filter(city_e == 0, !is.na(cylinders)) %>%
+  # Based on observation
+  ggplot() +
+  aes(x = displ , y = city08) +
+  geom_point()  
+```
+
+
+## Goal: Predict city fuel efficincy for singel fuel eff. cars
+
+```{r}
+non_electrical_cars <- 
+  big_epa_cars1 %>% 
+  # singel fuel cars, non electrical
+  filter(city_a08 == 0, city_e == 0) %>% 
+  # rearr. column
+  sample_frac(1)
+
+training_set <- non_electrical_cars %>% 
+  # The part that is used for training:
+  filter(row_number() %% 5 !=0)
+
+```
+
+
+
+```{r}
+library(broom)
+training_set %>% 
+  ggplot() +
+  aes( displ, city08) +
+  geom_point() +
+  geom_smooth( method = "lm")
+ 
+
+lm(city08 ~ displ, data = training_set) %>%  
+  augment( data = training_set) %>% 
+  # residual: avsatnad pred. mot faktisk poeng
+  ggplot( aes(displ, .resid) ) +
+  # Ønsker ikke at det skal være et mønster
+  # mindre mototrer er veldig feil-modellert
+    # Et reelt problem
+  geom_point()
+```
+
+spline: gir en større variasjon mellom x og y. Dette selv om linear regresjon.
+se part 2:
+```{r}
+library( splines)
+
+augmented_data <- lm(city08 ~ ns(displ,2), data = training_set) %>%  
+  augment( data = training_set)
+
+augmented_data%>%
+  ggplot() +
+  aes( displ, city08) +
+  geom_point() +
+  geom_line( aes(y = .fitted, color = "red", size =1)) +
+  theme( legend.position = "none")
+
+
+
+```
+
+
+Delt i to deler.
+```{r}
+lm(city08 ~ ns(displ,2), data = training_set) %>% summary
+```
+
+Vise hvordan splines fungerer:
+```{r}
+models <- 
+  tibble( df = 1:6) %>%  
+  mutate( lm_model = map(df, ~lm(city08 ~ ns(displ, .x) ,data =   training_set) )) 
+  
+```
+
+
+```{r}
+models %>% 
+  mutate( augmented = map(lm_model , function(x) {broom::augment(x, data = training_set)} )  ) %>% 
+  unnest( augmented) %>% 
+  ggplot( aes( displ, city08) ) +
+  geom_point() +
+  geom_line( aes(y = .fitted, color = factor(df) , size = 0.7  )) +
+  facet_wrap( ~ df) +
+  theme( legend.position = "none")
+
+augmented_unnested <-
+  models %>% 
+  mutate( augmented = map(lm_model , function(x) {broom::augment(x, data = training_set)} )  ) %>% 
+  unnest( augmented) 
+  
+augmented_unnested %>% 
+  ggplot( aes( displ, city08) ) +
+  geom_point() +
+  geom_line( aes(y = .fitted, color = factor(df) , size = 0.7  )) +
+  theme( legend.position = "none") +
+  labs( x = "Engien V (L)", y = "city MPG", color = "# degrees of freedom") +
+  expand_limits(x = 0, y = 0)
+
+```
+
+Vi gjør ikke ant. om form. Vet at den ikke er linear.
+
+Hvor mye bedre blir modellen fra økning df? Frem til 4, etter blir ikke modellen noe særlig bedre.
+
+```{r}
+glance_models <-
+  models %>% 
+  rename( spline_df = df) %>% 
+  mutate( glance = map(lm_model, glance, data = training_set)) %>% 
+  unnest(glance) 
+  
+#viser at r. blir bedre frem til 3.5-4.  
+
+glance_models %>% 
+  ggplot(aes(spline_df, adj.r.squared)) +
+  geom_line()
+```
+
+
+Ikke noen tolkning til ns()df.
+Bruk anova istedet.
+
+```{r}
+lm( city08 ~ns(displ, 4) + ns(cylinders, 3), data = training_set) %>% 
+  anova() %>% 
+  tidy() %>% 
+  mutate( pct_variation = sumsq/sum(sumsq))
+
+
+
+
+```
+
+ns_disp_ forklarer 61,7 %, mens cylinder -> velding lite. Hvorfor er dette tilfellet?
+
+Dette fordi displ. og cylinder -> er høyt korrelert.
+
+
+Stemmer antagelsen?
+```{r}
+training_set %>% 
+  drop_na() %>%
+  ggplot()  + aes(y = displ, x = as.factor(cylinders)) + geom_boxplot()
+```
+
+Det stemmer. Bruker derfor ikke begge variablene.
+
+Hva med year?
+
+
+```{r}
+training_set %>% 
+  ggplot( ) +
+  aes( year ) +
+  geom_histogram( binwidth = 1)
+```
+
+
+```{r}
+# training_set %>%  
+#   ggplot( ) +
+#   aes(year , city08, group = year) +
+#   geom_boxplot()
+
+
+training_set %>%
+  mutate( v_class = fct_lump(v_class, 6)) %>% 
+  group_by(year, v_class) %>% 
+  summarise( avg_efficiency = mean(city08)) %>% 
+  ggplot( ) +
+  aes( x = year , avg_efficiency, color = v_class) +
+  geom_line() +
+  expand_limits(y = 0)+
+  theme(legend.position  = "bottom")
+
+
+efficiency_time <-  
+  training_set %>%
+  mutate( v_class = fct_lump(v_class, 6),
+          guzzler = !is.na(guzzler)) %>% 
+  group_by(year = 2*floor(year/2), v_class) %>% 
+  # summarise( avg_efficiency = mean(city08), 
+  #            # Hva skyldes dette?
+  #            avg_cylinders = mean(cylinders))
+  summarise_at( vars( city08, cylinders, displ, guzzler), mean)
+
+efficiency_time
+
+
+efficiency_time %>%   
+  ggplot( ) +
+  aes( x = year , avg_efficiency, color = v_class) +
+  geom_line() +
+  expand_limits(y = 0)+
+  theme(legend.position  = "bottom")
+```
+
+
+Legg merke til øknining eff. ved 2010
+
+```{r}
+efficiency_time %>%   
+  ggplot( ) +
+  aes( x = year , avg_cylinders, color = v_class) +
+  geom_line() +
+  expand_limits(y = 0)
+
+```
+
+Motorstørrelse reduseres for store biler. 
+
+Hypotese:
+gas guzzler tax: ser ut som drops 2004. Motorstr. reduserers også rundt 2009 - mulig skatt/reg. 
+Ledet til en økning i fuel efficiency.
+
+
+
