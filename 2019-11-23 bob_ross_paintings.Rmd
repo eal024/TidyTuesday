@@ -1,0 +1,381 @@
+---
+title: "TidyTuesday_bobRoss"
+author: "Eirik Lamøy"
+date: "23 11 2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse);library(janitor)
+
+theme_set(theme_light())
+
+```
+
+## Bob Ross - painting by the numbers
+
+```{r}
+library(tidytuesdayR)
+
+bob_ross <- tt_load_gh("2019-08-06")
+
+bob_ross_data <- tidytuesdayR::tt_read_data(bob_ross, bob_ross[1]) %>% clean_names()
+```
+
+### Data cleaining
+
+```{r}
+bob_ross_elements <-
+  bob_ross_data %>% 
+  pivot_longer( names_to = "element", values_to = "present", apple_frame:wood_framed ) %>% 
+  filter( present == 1) %>% 
+  mutate( 
+    title = str_remove_all(str_to_title(title), '"'), 
+    element = str_to_title(str_replace(element, "_", "-"))) %>%
+  select( -present) %>% 
+  # !
+  extract( episode, c("season", "episode_number"), "S(.*)E(.*)", remove = F , convert = T) %>% 
+  arrange(season, episode_number)
+
+```
+
+## Look at data / Exploring the paintings
+
+- Dont wont 2 episodes have same title:
+
+```{r}
+# Two obs. with same name: worth noting
+bob_ross_elements %>% 
+  count( title, sort = T)
+```
+
+What are the most commend elements?
+
+Which title has most elements?
+
+Number of paintings in diff. year?
+```{r}
+bob_ross_elements %>% 
+  count(element, sort = T)
+
+bob_ross_elements %>% 
+  count(title, sort = T)
+
+# Alternativ to count
+bob_ross_elements %>% 
+  group_by(season) %>% 
+  summarise( n = n()) %>% arrange( desc(n))
+
+```
+
+Vis: Tree, Treess at the top. 
+```{r}
+bob_ross_gather <- bob_ross_elements
+
+bob_ross_gather %>% 
+  count(element, sort = T) %>% 
+  # Adjust size
+  # head( n = 15)
+  head( n = 25) %>% 
+  mutate( element = fct_reorder(element,n)) %>% 
+  ggplot( aes( element, n) )  + 
+  geom_col() +
+  coord_flip()
+
+```
+
+What are the most crowed paintings?
+```{r}
+## OBS! Title are not unique
+
+bob_ross_elements %>% 
+  add_count(episode) %>% 
+  arrange( desc(n))
+
+# How many paininting did Steve Ross?
+
+bob_ross_elements %>% filter(str_detect(element, "Steve"))
+
+# Alternativ
+# bob_ross_elements %>% 
+#   count(episode, sort = T) %>%
+#   head( n = 10) %>% 
+#   mutate( title = fct_reorder(episode,n)) %>% 
+#   ggplot( aes( title, n) )  + 
+#   geom_col() +
+#   coord_flip()
+   
+```
+
+How have Ross`s paintings chaniged over time?
+
+```{r}
+# How many episodes each season?
+
+bob_ross_elements %>% 
+  group_by(season) %>% 
+  summarise( episode = n_distinct(episode))
+
+## Check:
+
+bob_ross_elements %>% 
+  count( episode, element, sort = T)
+
+# Most season have tree
+bob_ross_elements %>% 
+  count( season, element, sort = T)
+
+# Desided to change from percent in season to percent included diff. elements
+by_season_element <-
+  bob_ross_elements %>% 
+  # Stopp word remove
+  filter(!element %in% c("Tree", "Trees")) %>% 
+  group_by( season) %>% 
+  mutate( number_episodes = n_distinct(episode)) %>% 
+  #add_count( season , name = "total_elements") %>% 
+  #count( season, element, total_elements, sort = T) %>%
+  count( season, element, number_episodes, sort = T) %>%
+  # Add percent_elements
+  #mutate( percent_elements = n/total_elements ) %>% 
+  mutate( percent_included = n/number_episodes ) %>% 
+  group_by(element) %>% 
+  # To effective incl. more elements:
+  mutate( element_total = sum(n)) %>% 
+  ungroup()
+
+by_season_element %>% 
+  filter(element_total >= 100) %>% 
+  ggplot() +
+  #aes( x = season, y = percent_elements) +
+  aes( x = season, y = percent_included ,color = element) +
+  geom_line() +
+  scale_y_continuous( labels = scales::percent_format()) +
+  expand_limits( y = 0) + 
+  facet_wrap(  ~element)
+
+```
+
+Hard to see a trend.
+
+Lets try to use 50:
+
+```{r}
+by_season_element %>% 
+  filter(element_total >= 50) %>% 
+  ggplot() +
+  #aes( x = season, y = percent_elements) +
+  aes( x = season, y = percent_included ,color = element) +
+  geom_line() +
+  scale_y_continuous( labels = scales::percent_format()) +
+  expand_limits( y = 0) + 
+  facet_wrap(  ~element)
+```
+
+### One alternative aprproach: 
+Logistic regression -> [se many models](https://r4ds.had.co.nz/many-models.html)
+
+
+### Clustering 
+what tends to appear together?
+
+Using the widyr (se the vignett)
+
+```{r}
+library(widyr)
+
+correlations <-
+  bob_ross_gather %>%
+  add_count( element) %>% 
+  filter( n >= 5) %>% 
+  pairwise_cor( element, episode, sort = T)
+
+# Try to find a trend.
+correlations %>% 
+  filter(item1 == "Snow") %>% 
+  mutate( item2 = fct_reorder(item2, correlation)) %>% 
+  ggplot( ) +
+  aes( item2, correlation) +
+  geom_col() +
+  coord_flip() +
+  labs( title = "What tends to appear with a river", subtitle = "Among elements that appeared in at least 10 paintings")
+
+
+correlations %>% 
+  filter(item1 == "Structure")
+
+correlations %>% 
+  filter(item1 == "Waves")
+
+
+```
+
+
+### Try to by more formal
+
+Cluster-graph
+
+```{r}
+library(ggraph)
+library(igraph)
+
+set.seed(2019)
+
+correlations %>%
+  # Number of conection:
+  head( 100) %>% 
+  graph_from_data_frame( ) %>% 
+  ggraph( ) +
+  geom_edge_link(aes(alpha = correlation)) +
+  geom_node_point() +
+  geom_node_text(aes(label = name ), vjust = 1, hjust = 1) +
+  theme_void()
+
+```
+
+
+### Principla component Analysis (PCA)
+
+PCA: What trend predict most about these paintings:
+
+- Predict - What kind of painting is it? Ex. Rock palm tre->nature pictures mm.
+
+
+1) What dimiensions drive a lot of the variation among paintings?
+```{r}
+library(reshape2)
+library(broom)
+binary_matrix <- bob_ross_gather %>% 
+  acast( title ~ element  )
+
+
+#binary_matrix %>% View()
+
+# Center the columns
+
+centered_matrix <- t(t(binary_matrix) - colMeans(binary_matrix))
+
+#colSums(  binary_matrix)
+
+svd_result <- svd(centered_matrix)
+
+
+element_weights <- tidy(svd_result, matrix = "v") %>% 
+  mutate( element = colnames(binary_matrix)[column])
+
+
+element_weights %>% 
+  # What separate tree from ocean and cloude?
+  filter(PC == 2) %>% 
+  top_n( 20 , abs(value)) %>% 
+  mutate( element = fct_reorder(element, value)) %>% 
+  ggplot( aes(element, value)) +
+  geom_col() +
+  coord_flip()
+
+library(tidytext)
+
+element_weights %>% 
+  # What separate tree from ocean and cloude?
+  filter(PC <= 4) %>% 
+  group_by(PC) %>% 
+  top_n( 16 , abs(value)) %>% 
+  ungroup() %>% 
+  mutate( element = reorder_within(element, value, PC)) %>% 
+  ggplot( aes(element, value)) +
+  geom_col() +
+  facet_wrap( ~PC, scales = "free") +
+  scale_x_reordered() +
+  coord_flip() +
+  labs( title = "First four principle components of Bob Ross paintings")
+
+# Order of PC random. The graph shows 
+# Snow vs. River/summer
+# Clouds vs. Decidous
+# Strong correlation, the PC is to 
+
+
+
+```
+
+1. Mountains vs. Ocean/Beach and decidous trees
+2. Trees espacially decidous, vs Ocean
+3. Summer vs. Winter
+4. Lake vs. River (dont appear together)
+ ( se the correlations between diff words)
+ 
+ 
+What is the paiting that is stronges in painting (PC = 1) 
+```{r}
+# u working on rows
+painting_weights <-broom::tidy(svd_result, matrix = "u") %>% 
+  mutate(painting = rownames(binary_matrix)[row])
+```
+
+4 Dimention of Bobb Ross paintings
+```{r}
+painting_weights %>% 
+  filter(PC == 1) %>% 
+  arrange(desc( value ) )
+
+# bob_ross_gather %>% 
+#   filter( title == "Mountain Waterfall")
+
+#Look at the graph facet wrapt # The positive side of the spectrum
+bob_ross_gather %>% 
+  filter( title == "Frozen Solitude")
+
+
+painting_weights %>% 
+  filter(PC == 1) %>% 
+  arrange(( value ) )
+
+#Look at the graph facet wrapt (1) The neg.end of the spectrum
+bob_ross_gather %>% 
+  filter( title == "Balmy Beach")
+
+
+```
+ 
+
+Which pictures are rel. to PC? (dim)
+```{r}
+
+
+painting_weights %>% 
+  # What separate tree from ocean and cloude?
+  filter(PC <= 4) %>% 
+  group_by(PC) %>% 
+  top_n( 20 , abs(value)) %>% 
+  ungroup() %>% 
+  mutate( element = reorder_within(painting, value, PC)) %>% 
+  ggplot( aes(element, value, fill = factor(PC))) +
+  geom_col(show.legend = F) +
+  facet_wrap( ~PC, scales = "free") +
+  scale_x_reordered() +
+  coord_flip() +
+  labs( title = "First four principle components of Bob Ross paintings") 
+  
+
+```
+
+Most winter-one: Lonely retreat -> Matches PC == 3 element
+
+### Next
+
+Dimention that is responsible for the variation
+
+```{r}
+broom::tidy(svd_result, matrix = "d") %>% 
+  ggplot( aes(PC, percent)) +
+  geom_point()
+```
+
+Top five are causes the most of the variation. 
+If there was no variation in the data, the curve would have been flat.
+
+
+Interpre. 1 point - descr. 15% nest 11% so on..
+
