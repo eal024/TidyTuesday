@@ -236,7 +236,7 @@ correlations %>%
 ```
 
 
-### Principla component Analysis (PCA)
+### principal component analysis (pca)
 
 PCA: What trend predict most about these paintings:
 
