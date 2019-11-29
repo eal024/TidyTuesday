@@ -379,3 +379,5 @@ If there was no variation in the data, the curve would have been flat.
 
 Interpre. 1 point - descr. 15% nest 11% so on..
 
+
+
