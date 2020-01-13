@@ -1,0 +1,264 @@
+---
+title: "NYC Squirrel Census"
+author: "Eirik Lamøy"
+date: "13 12 2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+theme_set(theme_light())
+```
+
+
+
+```{r}
+#library(tidytuesdayR)
+
+nyc_squirrels <- readr::read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2019/2019-10-29/nyc_squirrels.csv")
+
+```
+
+Start by explore lat and long
+
+```{r}
+nyc_squirrels %>% 
+  ggplot( ) +
+  aes( x = long, y = lat) +
+  geom_point()
+
+
+by_hectar <-
+  nyc_squirrels %>%
+  filter( !is.na(primary_fur_color)) %>% 
+  group_by(hectare) %>%
+  summarise(
+    long =  mean(long, na.rm = T),
+    lat = mean(lat, na.rm = T),
+    pct_gray = mean(primary_fur_color == "Gray", na.rm = T),
+    n = n()
+  )  
+
+by_hectar %>%
+  ggplot() +
+  aes(long, lat, size = n) +
+  geom_point() +
+  theme_void()
+
+```
+
+
+```{r}
+# Number of squires
+nyc_squirrels %>% distinct( unique_squirrel_id) %>% count()
+  
+# Notes -> count 
+nyc_squirrels %>% count(color_notes, sort = T)
+
+
+```
+
+
+```{r}
+nyc_squirrels %>% 
+  count( primary_fur_color, highlight_fur_color, sort = T) 
+
+
+# Color of sq. differ -> 
+by_hectar %>% 
+  filter(n >= 10 ) %>% 
+  ggplot( ) + aes( long, lat, size = n, color = pct_gray) +
+  geom_point()
+```
+
+
+
+```{r}
+# Number of suirrels with gray color, group by location
+nyc_squirrels %>% group_by(hectare) %>% summarise( pct = sum(primary_fur_color == "Gray", na.rm =T)) %>% arrange(desc(pct))
+
+
+# Viz. area by color
+by_hectar %>% 
+  filter( n >= 10) %>% 
+  ggplot( ) + aes( lat,pct_gray) +
+  geom_point() +
+  geom_smooth()
+
+```
+
+
+### Logistic regression: Does the color vary by lat?
+Speical trend
+Spcial log. regression -> [røflig. ikke spesialområdet til DR]
+
+
+```{r}
+
+by_hectar %>% 
+  mutate( n_gray = round( pct_gray*n )) %>% 
+  glm( cbind(n_gray, n - n_gray) ~ lat, data = ., family = "binomial" ) %>% summary
+
+# The higher north sq. are, more gray they 
+
+```
+
+squirrels may be more lukely to be gray the higher north we are in the park. And more likley to be cinnamon south.
+
+
+###  
+var description:
+- approaches:	logical	Squirrel was seen approaching human, seeking food.
+- indifferent	logical	Squirrel was indifferent to human presence.
+- runs_from	logical	.Squirrel was seen running from humans, seeing them as a threat.
+
+
+How is the correlation of this var-discr.?
+```{r}
+
+nyc_squirrels %>% 
+  count( highlight_fur_color, sort = T)
+
+nyc_squirrels %>% 
+  count( approaches, sort = T)
+
+nyc_squirrels %>% 
+  count( approaches, indifferent ,sort = T)
+
+
+```
+
+Is a squirrel indifferent to humans?
+
+- osb. confounding variables-> may have an affect 
+```{r}
+glm(  runs_from ~lat, data = nyc_squirrels,  family = "binomial") %>% summary
+```
+
+
+```{r}
+by_hectar <-
+  nyc_squirrels %>% 
+  add_count( hectare) %>% 
+  mutate( above_ground = !is.na(location) & location == "Above Ground") %>% 
+  group_by(hectare, n) %>% 
+  summarise_at( vars(long, lat, approaches:runs_from, ends_with("ing"), above_ground) , mean) %>%
+  ungroup()
+
+by_hectar %>% 
+  filter( x >= 10) %>% 
+  ggplot( ) + 
+  aes( long, lat, size = n, color = runs_from) +
+  geom_point() +
+  theme_void() +
+  scale_color_gradient2( low = "blue",
+                        high = "red",
+                        midpoint = .3,
+                        labels = scales::percent ) +
+  labs( color = "% of squirrels run", 
+        size = "# of squirrels",
+        title = "Squirrels in the northest\ncorner are more likely to run away")
+
+
+```
+
+
+## ggmap
+
+```{r}
+# library(ggmap)
+
+#step 1
+# get_map( location =  c(lon = -79.98, lat = 40.77))
+
+# by_hectar %>% 
+#   ggmap( ) +
+#   geom_point( aes( long, lat, color = runs_from) )
+
+```
+
+
+```{r}
+
+library( sf)
+
+central_park_sf <- read_sf("CentralAndProspectParks")
+
+ggplot( by_hectar) +
+  geom_sf( data = central_park_sf) +
+  geom_point( aes( long, lat , size = n, color = runs_from), data = by_hectar) +
+  theme_void() +
+    scale_color_gradient2( low = "blue",
+                        high = "red",
+                        midpoint = .3,
+                        labels = scales::percent ) +
+  labs( color = "% of squirrels run", 
+        size = "# of squirrels",
+        title = "Squirrels in the northest\ncorner are more likely to run away") +
+  coord_sf( datum = NA)
+
+
+```
+
+
+## Other info from the data
+
+What kinds of activity does the squirres do?
+
+```{r}
+# See which variables that ends with -ing
+nyc_squirrels %>% select( ends_with("ing"))
+
+nyc_squirrels %>%
+  pivot_longer(names_to = "activity", values_to = "doing", ends_with("ing")) %>%
+  filter( doing) %>% 
+  count( activity, sort = T)
+  
+  
+nyc_squirrels %>%
+  pivot_longer(names_to = "activity", values_to = "doing", ends_with("ing")) %>%
+  filter( doing) 
+
+```
+
+
+## Shiny
+
+```{r}
+
+next <- "next"
+```
+
+
+
+## What are the distr. of the variables.
+
+Many of the var has median equal 0.
+
+```{r}
+by_hectar %>% 
+  pivot_longer(names_to = "var", values_to = "value", approaches:foraging) %>%
+  filter( n >= 10) %>% 
+  ggplot() +
+  aes( x = value) +
+  geom_histogram() +
+  facet_wrap( ~var)
+
+
+```
+
+What about include adults?
+
+```{r}
+
+nyc_squirrels %>% 
+  count( age)
+
+```
+
+- not appropriate to include in the shiny-app. To many are adults
+
+

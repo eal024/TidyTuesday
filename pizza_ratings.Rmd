@@ -273,6 +273,7 @@ pizza_clean %>%
   labs( title = "Does Barstool sports dave agree with the critics?",
         x = "Crtical Averave score", y = "Dave score")
 
+
 ```
 
 
