@@ -1,0 +1,80 @@
+---
+title: "Our World in data: Crop yield"
+author: "Notes from D.Robinsons live coding"
+date: ""
+output: html_document
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, message = F, warning = F)
+```
+
+This R Markdown document is made interactive using Shiny. Unlike the more traditional workflow of creating static reports, you can now create documents that allow your readers to change the assumptions underlying your analysis and see the results immediately. 
+
+To learn more, see [Interactive Documents](http://rmarkdown.rstudio.com/authoring_shiny.html).
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(forcats)
+library(shiny)
+library(stringr)
+theme_set(theme_light())
+
+# Clean the data in one doc. the app in the other.
+yields_tidy <- readRDS("yields_tidy.rds") %>% mutate( crop = str_replace_all(crop, "_", " "),
+                                                      crop = str_to_title( crop))
+
+```
+
+
+```{r, include=F}
+ 
+plot_yields <- function(tbl) {
+  tbl %>% 
+     mutate( crop = fct_reorder( crop, -yield)) %>% 
+    mutate( entity = fct_reorder( entity, -yield)) %>% 
+     ggplot( aes(x = year, yield, color = entity)) +
+       geom_line() +
+       expand_limits( y = 0) +
+       facet_wrap(~crop, scales = "free_y") +
+       labs( x = "year", y = "Yield (tonnes per hectare)", title = "Crop yield over time", color = "Country")
+}
+#   
+# yields_tidy %>% filter( code == "USA") %>% plot_yields()
+# yields_tidy%>% filter( code %in% c("USA" , "IND" )) %>% plot_yields()
+```
+
+
+
+
+```{r eruptions, echo=FALSE}
+# inputPanel(
+#   selectInput("entity", 
+#               label = "Country/Continent/Region:",
+#               choices = unique(yields_tidy$entity ), 
+#               selected = c("Unitet State", "India"),
+#               selectize = T,
+#               multiple = TRUE) 
+#   )
+
+inputPanel(
+  selectInput("entity", 
+              label = "Country/Continent/Region:",
+              choices = unique(yields_tidy$entity ), 
+              selected = c("Unitet State", "India"),
+              selectize = T,
+              multiple = TRUE) 
+  )
+
+
+renderPlot({
+  yields_tidy %>% 
+    filter( entity %in% input$entity) %>% 
+    plot_yields()
+})
+```
+
+
